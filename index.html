@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Shooter — Power‑Up Edition</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{height:100vh;background:#000;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;align-items:center;overflow:hidden;user-select:none}
+#gameCanvas{border:2px solid #444;box-shadow:0 0 12px #0ff inset;image-rendering:pixelated;max-width:100%;height:auto}
+#overlay{position:absolute;top:10px;left:10px;font-size:20px;pointer-events:none;white-space:pre}
+#gameOver{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:48px;text-align:center;display:none}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div id="overlay"></div>
+<div id="gameOver"></div>
+<script>
+/**************************************
+ *  SPACE SHOOTER  –  POWER‑UP BLAST  *
+ **************************************/
+(function(){
+    const canvas=document.getElementById('gameCanvas');
+    const ctx=canvas.getContext('2d');
+    const W=canvas.width,H=canvas.height;const TAU=Math.PI*2,DEG=Math.PI/180;
+
+    /* ----------  UTIL  ---------- */
+    const rand=(a,b)=>Math.random()*(b-a)+a;
+    const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+    const dist=(p,q)=>Math.hypot(p.x-q.x,p.y-q.y);
+    const angleTo=(p,q)=>Math.atan2(q.y-p.y,q.x-p.x);
+
+    /* ----------  INPUT  ---------- */
+    const keys={};
+    window.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key.toLowerCase()]=true});
+    window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+    /* ----------  STARFIELD  ---------- */
+    const stars=Array.from({length:200},()=>({x:rand(0,W),y:rand(0,H),r:rand(0.5,1.5)}));
+    function drawStars(){ctx.fillStyle='#fff';stars.forEach(s=>{ctx.fillRect(s.x,s.y,s.r,s.r);if(Math.random()<0.002){s.x=rand(0,W);s.y=0;}s.y+=20*delta; if(s.y>H)s.y=0;});}
+
+    /* ----------  PARTICLES  ---------- */
+    class Particle{constructor(x,y,c){this.x=x;this.y=y;this.vx=rand(-2,2);this.vy=rand(-2,2);this.life=1;this.size=rand(1.5,3);this.c=c;}update(dt){this.life-=dt;this.x+=this.vx;this.y+=this.vy;this.vx*=0.96;this.vy*=0.96;}draw(){ctx.globalAlpha=Math.max(this.life,0);ctx.fillStyle=this.c;ctx.fillRect(this.x,this.y,this.size,this.size);ctx.globalAlpha=1;}}
+
+    /* ----------  BULLETS  ---------- */
+    class Bullet{constructor(x,y,a){this.x=x;this.y=y;this.a=a;this.speed=650;this.r=2;this.life=1.6;}update(dt){this.x+=Math.cos(this.a)*this.speed*dt;this.y+=Math.sin(this.a)*this.speed*dt;this.life-=dt;}draw(){ctx.fillStyle='#fffd8a';ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,TAU);ctx.fill();}off(){return this.life<=0||this.x<-10||this.x>W+10||this.y<-10||this.y>H+10;}}
+
+    /* ----------  ENEMIES  ---------- */
+    class Enemy{constructor(){const side=Math.floor(rand(0,4));if(side===0){this.x=rand(0,W);this.y=-20;}else if(side===1){this.x=rand(0,W);this.y=H+20;}else if(side===2){this.x=-20;this.y=rand(0,H);}else{this.x=W+20;this.y=rand(0,H);}this.r=16;this.speed=rand(60,130);this.a=0;this.turn=rand(0.6,1.6);}update(dt){this.a+=rand(-0.3,0.3)*dt;const targetAngle=angleTo(this,player);let diff=targetAngle-this.a;if(diff>Math.PI)diff-=TAU;if(diff<-Math.PI)diff+=TAU;this.a+=clamp(diff,-this.turn*dt,this.turn*dt);this.x+=Math.cos(this.a)*this.speed*dt;this.y+=Math.sin(this.a)*this.speed*dt;}draw(){ctx.fillStyle='#f55';ctx.beginPath();ctx.moveTo(this.x+Math.cos(this.a)*this.r,this.y+Math.sin(this.a)*this.r);ctx.lineTo(this.x+Math.cos(this.a+140*DEG)*this.r,this.y+Math.sin(this.a+140*DEG)*this.r);ctx.lineTo(this.x+Math.cos(this.a-140*DEG)*this.r,this.y+Math.sin(this.a-140*DEG)*this.r);ctx.closePath();ctx.fill();}off(){return this.x<-40||this.x>W+40||this.y<-40||this.y>H+40;}}
+
+    /* ----------  ASTEROIDS  ---------- */
+    class Asteroid{constructor(){this.x=rand(0,W);this.y=-30;this.vx=rand(-25,25);this.vy=rand(35,85);this.r=rand(14,34);this.a=rand(0,TAU);this.spin=rand(-1,1);}update(dt){this.x+=this.vx*dt;this.y+=this.vy*dt;this.a+=this.spin*dt;}draw(){ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.a);ctx.strokeStyle='#a88';ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<7;i++){const ang=i/7*TAU;ctx.lineTo(Math.cos(ang)*(this.r+rand(-4,4)),Math.sin(ang)*(this.r+rand(-4,4)));}ctx.closePath();ctx.stroke();ctx.restore();}off(){return this.y-this.r>H+40;}}
+
+    /* ----------  POWER‑UPS  ---------- */
+    const POWER_TYPES=['rapid','spread','shield'];
+    const P_COLORS={rapid:'#00ff8a',spread:'#ffe500',shield:'#00e4ff'};
+    class PowerUp{constructor(x,y){this.x=x;this.y=y;this.type=POWER_TYPES[Math.floor(rand(0,POWER_TYPES.length))];this.r=11;this.life=9;}update(dt){this.life-=dt;}draw(){ctx.fillStyle=P_COLORS[this.type];ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,TAU);ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.stroke();}dead(){return this.life<=0;}}
+
+    /* ----------  PLAYER  ---------- */
+    class Player{constructor(){this.reset();}
+        reset(){this.x=W/2;this.y=H*0.75;this.a=-90*DEG;this.vx=0;this.vy=0;this.r=14;this.acc=420;this.turn=250*DEG;this.lives=3;this.score=0;this.cd=0;this.inv=0;this.rapid=0;this.spread=0;this.shield=0;}
+        update(dt){if(keys['arrowleft']||keys['a'])this.a-=this.turn*dt;if(keys['arrowright']||keys['d'])this.a+=this.turn*dt;
+            const thrusting=keys['arrowup']||keys['w'];if(thrusting){this.vx+=Math.cos(this.a)*this.acc*dt;this.vy+=Math.sin(this.a)*this.acc*dt;thruster(this);}this.vx*=0.991;this.vy*=0.991;this.x+=this.vx*dt;this.y+=this.vy*dt;/* wrap */if(this.x<0)this.x+=W;else if(this.x>W)this.x-=W;if(this.y<0)this.y+=H;else if(this.y>H)this.y-=H;
+            this.cd-=dt;const rate=this.rapid>0?0.07:(this.spread>0?0.15:0.25);if((keys[' ']||keys['space'])&&this.cd<=0){this.shoot();this.cd=rate;}
+            if(this.inv>0)this.inv-=dt;if(this.rapid>0)this.rapid-=dt;if(this.spread>0)this.spread-=dt;if(this.shield>0)this.shield-=dt;}
+        shoot(){const nose={x:this.x+Math.cos(this.a)*this.r,y:this.y+Math.sin(this.a)*this.r};bullets.push(new Bullet(nose.x,nose.y,this.a));if(this.spread>0){bullets.push(new Bullet(nose.x,nose.y,this.a-8*DEG));bullets.push(new Bullet(nose.x,nose.y,this.a+8*DEG));}}
+        draw(){if(this.inv>0&&Math.floor(this.inv*10)%2)return;ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.a+Math.PI/2);ctx.fillStyle='#0af';ctx.beginPath();ctx.moveTo(0,-this.r);ctx.lineTo(-this.r*0.8,this.r);ctx.lineTo(this.r*0.8,this.r);ctx.closePath();ctx.fill();ctx.restore();if(this.shield>0){ctx.strokeStyle='rgba(0,224,255,0.6)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(this.x,this.y,this.r+6,0,TAU);ctx.stroke();}}
+        hit(){if(this.inv>0||this.shield>0)return;if(--this.lives<=0){explode(this.x,this.y,'#0af');setGameOver();}else{this.inv=2;explode(this.x,this.y,'#0af');shake(6,0.5);}}
+    }
+
+    /* ----------  EFFECTS  ---------- */
+    const particles=[],bullets=[],enemies=[],asteroids=[],powerUps=[];const player=new Player();
+    function thruster(pl){const bx=pl.x-Math.cos(pl.a)*pl.r,by=pl.y-Math.sin(pl.a)*pl.r;particles.push(new Particle(bx,by,'orange'));}
+    function explode(x,y,c){for(let i=0;i<30;i++)particles.push(new Particle(x,y,c));}
+    let shakeT=0,shakeI=0;function shake(i,t){shakeI=i;shakeT=t;}
+
+    /* ----------  SPAWNERS  ---------- */
+    let enemyT=0,enemyInt=2,astT=0,astInt=3,diffT=0;
+    function spawnEnemy(){enemies.push(new Enemy());}
+    function spawnAsteroid(){asteroids.push(new Asteroid());}
+
+    /* ----------  GAME LOOP  ---------- */
+    let last=0,delta=0,run=true;const overlay=document.getElementById('overlay'),gameOver=document.getElementById('gameOver');
+    function update(dt){if(!run)return;enemyT+=dt;astT+=dt;diffT+=dt;if(enemyT>=enemyInt){enemyT=0;spawnEnemy();}if(astT>=astInt){astT=0;spawnAsteroid();}if(diffT>=10){diffT=0;enemyInt=Math.max(0.5,enemyInt*0.9);astInt=Math.max(0.7,astInt*0.9);}player.update(dt);
+        bullets.forEach((b,i)=>{b.update(dt);if(b.off())bullets.splice(i,1);});
+        enemies.forEach((e,i)=>{e.update(dt);if(e.off())enemies.splice(i,1);});
+        asteroids.forEach((a,i)=>{a.update(dt);if(a.off())asteroids.splice(i,1);});
+        particles.forEach((p,i)=>{p.update(dt);if(p.life<=0)particles.splice(i,1);});
+        powerUps.forEach((pu,i)=>{pu.update(dt);if(pu.dead())powerUps.splice(i,1);});
+        /* collisions */
+        bulletsLoop:for(let i=bullets.length-1;i>=0;i--){const b=bullets[i];for(let j=enemies.length-1;j>=0;j--){const e=enemies[j];if(dist(b,e)<e.r){bullets.splice(i,1);enemies.splice(j,1);explode(e.x,e.y,'#f55');player.score+=100;if(Math.random()<0.15)dropPower(e.x,e.y);shake(4,0.3);continue bulletsLoop;}}for(let j=asteroids.length-1;j>=0;j--){const a=asteroids[j];if(dist(b,a)<a.r){bullets.splice(i,1);asteroids.splice(j,1);explode(a.x,a.y,'#ffb100');player.score+=50;if(Math.random()<0.1)dropPower(a.x,a.y);shake(3,0.25);continue bulletsLoop;}}}
+        enemies.forEach((e,i)=>{if(dist(player,e)<player.r+e.r){player.hit();explode(e.x,e.y,'#f55');enemies.splice(i,1);}});
+        asteroids.forEach((a,i)=>{if(dist(player,a)<player.r+a.r){player.hit();explode(a.x,a.y,'#ffb100');asteroids.splice(i,1);}});
+        powerUps.forEach((pu,i)=>{if(dist(player,pu)<player.r+pu.r){applyPower(pu.type);powerUps.splice(i,1);shake(2,0.2);}});
+        if(shakeT>0)shakeT-=dt;
+    }
+    function dropPower(x,y){powerUps.push(new PowerUp(x,y));}
+    function applyPower(type){switch(type){case 'rapid':player.rapid=8;break;case 'spread':player.spread=8;break;case 'shield':player.shield=6;break;}}
+
+    function draw(){ctx.save();if(shakeT>0)ctx.translate(rand(-shakeI,shakeI),rand(-shakeI,shakeI));ctx.clearRect(0,0,W,H);drawStars();player.draw();bullets.forEach(b=>b.draw());enemies.forEach(e=>e.draw());asteroids.forEach(a=>a.draw());powerUps.forEach(pu=>pu.draw());particles.forEach(p=>p.draw());ctx.restore();overlay.textContent=`Score: ${player.score}   Lives: ${player.lives}\nRapid:${player.rapid.toFixed(1)}  Spread:${player.spread.toFixed(1)}  Shield:${player.shield.toFixed(1)}`;}
+
+    function loop(t){delta=(t-last)/1000||0;last=t;update(delta);draw();requestAnimationFrame(loop);}requestAnimationFrame(loop);
+
+    /* ----------  GAME OVER / RESTART ---------- */
+    function setGameOver(){run=false;gameOver.style.display='block';gameOver.innerHTML=`GAME OVER<br>Score: ${player.score}<br><small>Press R to restart</small>`;}
+    function restart(){bullets.length=enemies.length=asteroids.length=particles.length=powerUps.length=0;player.reset();enemyInt=2;astInt=3;diffT=0;run=true;gameOver.style.display='none';}
+    window.addEventListener('keydown',e=>{if(!run&&e.key.toLowerCase()==='r')restart();});
+})();
+</script>
+</body>
+</html>
